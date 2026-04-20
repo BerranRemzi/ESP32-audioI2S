@@ -27,7 +27,7 @@ static bool jsonEscape(const char* src, char* dst, size_t dstSize){
     size_t srcLen = strlen(src);
     size_t j = 0;
     for(size_t i = 0; i < srcLen; i++) {
-        uint8_t c = (uint8_t)src[i];
+        unsigned char c = (unsigned char)src[i];
         if(c == '\"' || c == '\\') {
             if(j + 2 >= dstSize) return false;
             dst[j++] = '\\';
@@ -874,6 +874,7 @@ bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const c
     }
 
     memcpy(voiceEsc, voice_id, voiceIdLen + 1);
+    // voiceEscMax was sized for worst-case URL encoding expansion (%XX => 3 chars per source byte).
     urlencode(voiceEsc, voiceEscMax);
 
     int endpointLen = snprintf(NULL, 0, endpointFmt, voiceEsc);
@@ -930,7 +931,7 @@ bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const c
 
     int written = snprintf(req, reqLen + 1, reqFmt, endpoint, host, api_key, (unsigned int)strlen(payload), payload);
 
-    if(written <= 0 || written > reqLen) {
+    if(written <= 0 || written != reqLen) {
         free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload); free(req);
         AUDIO_INFO("ElevenLabs request build failed");
         return false;
