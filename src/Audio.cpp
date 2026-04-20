@@ -886,7 +886,7 @@ bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const c
     snprintf(endpoint, endpointLen, endpointFmt, voiceEsc);
 
     const char* payloadFmt = "{\"text\":\"%s\",\"model_id\":\"%s\"}";
-    size_t payloadLen = strlen(speechEsc) + strlen(modelEsc) + sizeof("{\"text\":\"\",\"model_id\":\"\"}");
+    size_t payloadLen = strlen(speechEsc) + strlen(modelEsc) + strlen("{\"text\":\"\",\"model_id\":\"\"}") + 1;
     char* payload = (char*)malloc(payloadLen);
     if(!payload) {
         free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint);
@@ -895,9 +895,10 @@ bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const c
     }
     snprintf(payload, payloadLen, payloadFmt, speechEsc, modelEsc);
 
+    const size_t MAX_CONTENT_LENGTH_DIGITS = 10; // max digits for a 32-bit Content-Length value
     size_t reqLen = strlen(endpoint) + strlen(host) + strlen(api_key) + strlen(payload)
-                  + sizeof("POST  HTTP/1.1\r\nHost: \r\nxi-api-key: \r\nContent-Type: application/json\r\nAccept: audio/mpeg\r\nAccept-Encoding: identity\r\nConnection: close\r\nContent-Length: \r\n\r\n")
-                  + 12;
+                  + strlen("POST  HTTP/1.1\r\nHost: \r\nxi-api-key: \r\nContent-Type: application/json\r\nAccept: audio/mpeg\r\nAccept-Encoding: identity\r\nConnection: close\r\nContent-Length: \r\n\r\n")
+                  + MAX_CONTENT_LENGTH_DIGITS + 1;
     char* req = (char*)malloc(reqLen);
     if(!req) {
         free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload);
