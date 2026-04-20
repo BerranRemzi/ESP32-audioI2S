@@ -790,6 +790,173 @@ bool Audio::connecttospeech(const char* speech, const char* lang){
     return true;
 }
 //---------------------------------------------------------------------------------------------------------------------
+bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const char* voice_id, const char* model_id){
+
+    if(!speech || !speech[0]) {
+        AUDIO_INFO("Speech text is empty");
+        return false;
+    }
+    if(!api_key || !api_key[0]) {
+        AUDIO_INFO("ElevenLabs API key is empty");
+        return false;
+    }
+    if(!voice_id || !voice_id[0]) {
+        AUDIO_INFO("ElevenLabs voice id is empty");
+        return false;
+    }
+    if(!model_id || !model_id[0]) {
+        AUDIO_INFO("ElevenLabs model id is empty");
+        return false;
+    }
+
+    setDefaults();
+
+    const char* host = "api.elevenlabs.io";
+    const uint16_t port = 443;
+    const char* endpointFmt = "/v1/text-to-speech/%s/stream?output_format=mp3_44100_128";
+
+    size_t speechLen = strlen(speech);
+    size_t modelLen = strlen(model_id);
+    size_t voiceIdLen = strlen(voice_id);
+
+    size_t speechEscMax = speechLen * 6 + 1;
+    size_t modelEscMax = modelLen * 6 + 1;
+    size_t voiceEscMax = voiceIdLen * 3 + 1;
+
+    char* speechEsc = (char*)malloc(speechEscMax);
+    char* modelEsc = (char*)malloc(modelEscMax);
+    char* voiceEsc = (char*)malloc(voiceEscMax);
+
+    if(!speechEsc || !modelEsc || !voiceEsc) {
+        if(speechEsc) free(speechEsc);
+        if(modelEsc) free(modelEsc);
+        if(voiceEsc) free(voiceEsc);
+        log_e("out of memory");
+        return false;
+    }
+
+    size_t j = 0;
+    for(size_t i = 0; i < speechLen && j < speechEscMax - 1; i++) {
+        uint8_t c = (uint8_t)speech[i];
+        if(c == '\"' || c == '\\') {
+            if(j + 2 >= speechEscMax) break;
+            speechEsc[j++] = '\\';
+            speechEsc[j++] = c;
+        }
+        else if(c == '\b') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='b';}
+        else if(c == '\f') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='f';}
+        else if(c == '\n') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='n';}
+        else if(c == '\r') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='r';}
+        else if(c == '\t') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='t';}
+        else if(c < 0x20) {
+            if(j + 6 >= speechEscMax) break;
+            snprintf(speechEsc + j, 7, "\\u%04x", c);
+            j += 6;
+        }
+        else {
+            speechEsc[j++] = speech[i];
+        }
+    }
+    speechEsc[j] = '\0';
+
+    j = 0;
+    for(size_t i = 0; i < modelLen && j < modelEscMax - 1; i++) {
+        uint8_t c = (uint8_t)model_id[i];
+        if(c == '\"' || c == '\\') {
+            if(j + 2 >= modelEscMax) break;
+            modelEsc[j++] = '\\';
+            modelEsc[j++] = c;
+        }
+        else if(c == '\b') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='b';}
+        else if(c == '\f') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='f';}
+        else if(c == '\n') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='n';}
+        else if(c == '\r') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='r';}
+        else if(c == '\t') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='t';}
+        else if(c < 0x20) {
+            if(j + 6 >= modelEscMax) break;
+            snprintf(modelEsc + j, 7, "\\u%04x", c);
+            j += 6;
+        }
+        else {
+            modelEsc[j++] = model_id[i];
+        }
+    }
+    modelEsc[j] = '\0';
+
+    memcpy(voiceEsc, voice_id, voiceIdLen + 1);
+    urlencode(voiceEsc, voiceEscMax);
+
+    size_t endpointLen = strlen(endpointFmt) + strlen(voiceEsc) + 1;
+    char* endpoint = (char*)malloc(endpointLen);
+    if(!endpoint) {
+        free(speechEsc); free(modelEsc); free(voiceEsc);
+        log_e("out of memory");
+        return false;
+    }
+    snprintf(endpoint, endpointLen, endpointFmt, voiceEsc);
+
+    size_t payloadLen = strlen(speechEsc) + strlen(modelEsc) + 32;
+    char* payload = (char*)malloc(payloadLen);
+    if(!payload) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint);
+        log_e("out of memory");
+        return false;
+    }
+    snprintf(payload, payloadLen, "{\"text\":\"%s\",\"model_id\":\"%s\"}", speechEsc, modelEsc);
+
+    size_t reqLen = strlen(endpoint) + strlen(host) + strlen(api_key) + strlen(payload) + 300;
+    char* req = (char*)malloc(reqLen);
+    if(!req) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload);
+        log_e("out of memory");
+        return false;
+    }
+
+    int written = snprintf(req, reqLen,
+                           "POST %s HTTP/1.1\r\n"
+                           "Host: %s\r\n"
+                           "xi-api-key: %s\r\n"
+                           "Content-Type: application/json\r\n"
+                           "Accept: audio/mpeg\r\n"
+                           "Accept-Encoding: identity\r\n"
+                           "Connection: close\r\n"
+                           "Content-Length: %u\r\n\r\n"
+                           "%s",
+                           endpoint, host, api_key, (unsigned int)strlen(payload), payload);
+
+    if(written <= 0 || (size_t)written >= reqLen) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload); free(req);
+        AUDIO_INFO("ElevenLabs request build failed");
+        return false;
+    }
+
+    _client = static_cast<WiFiClient*>(&clientsecure);
+    if(!_client->connect(host, port, m_timeout_ms_ssl)) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload); free(req);
+        AUDIO_INFO("Connection to ElevenLabs failed");
+        return false;
+    }
+
+    _client->print(req);
+
+    snprintf(m_lastHost, sizeof(m_lastHost), "https://%s%s", host, endpoint);
+    m_streamType = ST_WEBFILE;
+    m_f_running = true;
+    m_f_ssl = true;
+    m_f_tts = true;
+    m_expectedCodec = CODEC_MP3;
+    m_expectedPlsFmt = FORMAT_NONE;
+    setDatamode(HTTP_RESPONSE_HEADER);
+
+    free(speechEsc);
+    free(modelEsc);
+    free(voiceEsc);
+    free(endpoint);
+    free(payload);
+    free(req);
+    return true;
+}
+//---------------------------------------------------------------------------------------------------------------------
 bool Audio::connecttomarytts(const char* speech, const char* lang, const char* voice){
 
     //lang:     fr, te, ru, en_US, en_GB, sv, lb, tr, de, it

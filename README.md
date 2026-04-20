@@ -46,6 +46,7 @@ void setup() {
 //    audio.connecttohost("https://github.com/schreibfaul1/ESP32-audioI2S/raw/master/additional_info/Testfiles/sample1.m4a"); // m4a
 //    audio.connecttohost("https://github.com/schreibfaul1/ESP32-audioI2S/raw/master/additional_info/Testfiles/test_16bit_stereo.wav"); // wav
 //    audio.connecttospeech("Wenn die Hunde schlafen, kann der Wolf gut Schafe stehlen.", "de");
+//    audio.connecttoelevenlabs("The first move is what sets everything in motion.", "YOUR_API_KEY", "JBFqnCBsd6RMkjVDRZzb");
 }
 
 void loop()

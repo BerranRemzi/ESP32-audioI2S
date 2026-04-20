@@ -173,6 +173,7 @@ public:
     bool connecttohost(const char* host, const char* user = "", const char* pwd = "");
 
     bool connecttospeech(const char* speech, const char* lang);
+    bool connecttoelevenlabs(const char* speech, const char* api_key, const char* voice_id, const char* model_id = "eleven_multilingual_v2");
     bool connecttomarytts(const char* speech, const char* lang, const char* voice);
 #ifndef AUDIO_NO_SD_FS
     bool connecttoFS(fs::FS &fs, const char* path, uint32_t resumeFilePos = 0);
