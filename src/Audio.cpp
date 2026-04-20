@@ -876,49 +876,61 @@ bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const c
     memcpy(voiceEsc, voice_id, voiceIdLen + 1);
     urlencode(voiceEsc, voiceEscMax);
 
-    size_t endpointLen = strlen(endpointFmt) + strlen(voiceEsc) + 1;
-    char* endpoint = (char*)malloc(endpointLen);
+    int endpointLen = snprintf(NULL, 0, endpointFmt, voiceEsc);
+    if(endpointLen < 0) {
+        free(speechEsc); free(modelEsc); free(voiceEsc);
+        AUDIO_INFO("ElevenLabs endpoint build failed");
+        return false;
+    }
+    char* endpoint = (char*)malloc(endpointLen + 1);
     if(!endpoint) {
         free(speechEsc); free(modelEsc); free(voiceEsc);
         log_e("out of memory");
         return false;
     }
-    snprintf(endpoint, endpointLen, endpointFmt, voiceEsc);
+    snprintf(endpoint, endpointLen + 1, endpointFmt, voiceEsc);
 
     const char* payloadFmt = "{\"text\":\"%s\",\"model_id\":\"%s\"}";
-    size_t payloadLen = strlen(speechEsc) + strlen(modelEsc) + strlen("{\"text\":\"\",\"model_id\":\"\"}") + 1;
-    char* payload = (char*)malloc(payloadLen);
+    int payloadLen = snprintf(NULL, 0, payloadFmt, speechEsc, modelEsc);
+    if(payloadLen < 0) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint);
+        AUDIO_INFO("ElevenLabs payload build failed");
+        return false;
+    }
+    char* payload = (char*)malloc(payloadLen + 1);
     if(!payload) {
         free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint);
         log_e("out of memory");
         return false;
     }
-    snprintf(payload, payloadLen, payloadFmt, speechEsc, modelEsc);
+    snprintf(payload, payloadLen + 1, payloadFmt, speechEsc, modelEsc);
 
-    const size_t MAX_CONTENT_LENGTH_DIGITS = 10; // max digits for a 32-bit Content-Length value
-    size_t reqLen = strlen(endpoint) + strlen(host) + strlen(api_key) + strlen(payload)
-                  + strlen("POST  HTTP/1.1\r\nHost: \r\nxi-api-key: \r\nContent-Type: application/json\r\nAccept: audio/mpeg\r\nAccept-Encoding: identity\r\nConnection: close\r\nContent-Length: \r\n\r\n")
-                  + MAX_CONTENT_LENGTH_DIGITS + 1;
-    char* req = (char*)malloc(reqLen);
+    const char* reqFmt =
+            "POST %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "xi-api-key: %s\r\n"
+            "Content-Type: application/json\r\n"
+            "Accept: audio/mpeg\r\n"
+            "Accept-Encoding: identity\r\n"
+            "Connection: close\r\n"
+            "Content-Length: %u\r\n\r\n"
+            "%s";
+    int reqLen = snprintf(NULL, 0, reqFmt, endpoint, host, api_key, (unsigned int)strlen(payload), payload);
+    if(reqLen < 0) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload);
+        AUDIO_INFO("ElevenLabs request build failed");
+        return false;
+    }
+    char* req = (char*)malloc(reqLen + 1);
     if(!req) {
         free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload);
         log_e("out of memory");
         return false;
     }
 
-    int written = snprintf(req, reqLen,
-                           "POST %s HTTP/1.1\r\n"
-                           "Host: %s\r\n"
-                           "xi-api-key: %s\r\n"
-                           "Content-Type: application/json\r\n"
-                           "Accept: audio/mpeg\r\n"
-                           "Accept-Encoding: identity\r\n"
-                           "Connection: close\r\n"
-                           "Content-Length: %u\r\n\r\n"
-                           "%s",
-                           endpoint, host, api_key, (unsigned int)strlen(payload), payload);
+    int written = snprintf(req, reqLen + 1, reqFmt, endpoint, host, api_key, (unsigned int)strlen(payload), payload);
 
-    if(written <= 0 || (size_t)written >= reqLen) {
+    if(written <= 0 || written > reqLen) {
         free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload); free(req);
         AUDIO_INFO("ElevenLabs request build failed");
         return false;
