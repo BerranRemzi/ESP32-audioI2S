@@ -22,6 +22,36 @@ fs::SDFATFS SD_SDFAT;
 #endif
 #endif // AUDIO_NO_SD_FS
 
+static bool jsonEscape(const char* src, char* dst, size_t dstSize){
+    if(!src || !dst || !dstSize) return false;
+    size_t srcLen = strlen(src);
+    size_t j = 0;
+    for(size_t i = 0; i < srcLen; i++) {
+        uint8_t c = (uint8_t)src[i];
+        if(c == '\"' || c == '\\') {
+            if(j + 2 >= dstSize) return false;
+            dst[j++] = '\\';
+            dst[j++] = c;
+        }
+        else if(c == '\b') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='b';}
+        else if(c == '\f') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='f';}
+        else if(c == '\n') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='n';}
+        else if(c == '\r') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='r';}
+        else if(c == '\t') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='t';}
+        else if(c < 0x20) {
+            if(j + 6 >= dstSize) return false;
+            snprintf(dst + j, 7, "\\u%04x", c);
+            j += 6;
+        }
+        else {
+            if(j + 1 >= dstSize) return false;
+            dst[j++] = src[i];
+        }
+    }
+    dst[j] = '\0';
+    return true;
+}
+
 //---------------------------------------------------------------------------------------------------------------------
 AudioBuffer::AudioBuffer(size_t maxBlockSize) {
     // if maxBlockSize isn't set use defaultspace (1600 bytes) is enough for aac and mp3 player
@@ -819,8 +849,10 @@ bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const c
     size_t modelLen = strlen(model_id);
     size_t voiceIdLen = strlen(voice_id);
 
+    // worst case JSON escape expansion uses \u0000 (6 bytes per source byte)
     size_t speechEscMax = speechLen * 6 + 1;
     size_t modelEscMax = modelLen * 6 + 1;
+    // worst case URL escape expansion uses %XX (3 bytes per source byte)
     size_t voiceEscMax = voiceIdLen * 3 + 1;
 
     char* speechEsc = (char*)malloc(speechEscMax);
@@ -835,53 +867,11 @@ bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const c
         return false;
     }
 
-    size_t j = 0;
-    for(size_t i = 0; i < speechLen && j < speechEscMax - 1; i++) {
-        uint8_t c = (uint8_t)speech[i];
-        if(c == '\"' || c == '\\') {
-            if(j + 2 >= speechEscMax) break;
-            speechEsc[j++] = '\\';
-            speechEsc[j++] = c;
-        }
-        else if(c == '\b') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='b';}
-        else if(c == '\f') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='f';}
-        else if(c == '\n') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='n';}
-        else if(c == '\r') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='r';}
-        else if(c == '\t') {if(j + 2 >= speechEscMax) break; speechEsc[j++]='\\'; speechEsc[j++]='t';}
-        else if(c < 0x20) {
-            if(j + 6 >= speechEscMax) break;
-            snprintf(speechEsc + j, 7, "\\u%04x", c);
-            j += 6;
-        }
-        else {
-            speechEsc[j++] = speech[i];
-        }
+    if(!jsonEscape(speech, speechEsc, speechEscMax) || !jsonEscape(model_id, modelEsc, modelEscMax)) {
+        free(speechEsc); free(modelEsc); free(voiceEsc);
+        AUDIO_INFO("ElevenLabs payload escape failed");
+        return false;
     }
-    speechEsc[j] = '\0';
-
-    j = 0;
-    for(size_t i = 0; i < modelLen && j < modelEscMax - 1; i++) {
-        uint8_t c = (uint8_t)model_id[i];
-        if(c == '\"' || c == '\\') {
-            if(j + 2 >= modelEscMax) break;
-            modelEsc[j++] = '\\';
-            modelEsc[j++] = c;
-        }
-        else if(c == '\b') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='b';}
-        else if(c == '\f') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='f';}
-        else if(c == '\n') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='n';}
-        else if(c == '\r') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='r';}
-        else if(c == '\t') {if(j + 2 >= modelEscMax) break; modelEsc[j++]='\\'; modelEsc[j++]='t';}
-        else if(c < 0x20) {
-            if(j + 6 >= modelEscMax) break;
-            snprintf(modelEsc + j, 7, "\\u%04x", c);
-            j += 6;
-        }
-        else {
-            modelEsc[j++] = model_id[i];
-        }
-    }
-    modelEsc[j] = '\0';
 
     memcpy(voiceEsc, voice_id, voiceIdLen + 1);
     urlencode(voiceEsc, voiceEscMax);
@@ -895,16 +885,19 @@ bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const c
     }
     snprintf(endpoint, endpointLen, endpointFmt, voiceEsc);
 
-    size_t payloadLen = strlen(speechEsc) + strlen(modelEsc) + 32;
+    const char* payloadFmt = "{\"text\":\"%s\",\"model_id\":\"%s\"}";
+    size_t payloadLen = strlen(speechEsc) + strlen(modelEsc) + sizeof("{\"text\":\"\",\"model_id\":\"\"}");
     char* payload = (char*)malloc(payloadLen);
     if(!payload) {
         free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint);
         log_e("out of memory");
         return false;
     }
-    snprintf(payload, payloadLen, "{\"text\":\"%s\",\"model_id\":\"%s\"}", speechEsc, modelEsc);
+    snprintf(payload, payloadLen, payloadFmt, speechEsc, modelEsc);
 
-    size_t reqLen = strlen(endpoint) + strlen(host) + strlen(api_key) + strlen(payload) + 300;
+    size_t reqLen = strlen(endpoint) + strlen(host) + strlen(api_key) + strlen(payload)
+                  + sizeof("POST  HTTP/1.1\r\nHost: \r\nxi-api-key: \r\nContent-Type: application/json\r\nAccept: audio/mpeg\r\nAccept-Encoding: identity\r\nConnection: close\r\nContent-Length: \r\n\r\n")
+                  + 12;
     char* req = (char*)malloc(reqLen);
     if(!req) {
         free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload);
