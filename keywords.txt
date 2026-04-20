@@ -27,6 +27,7 @@ audio_id3image	KEYWORD2
 connecttoSD	KEYWORD2
 connecttoFS	KEYWORD2
 connecttohost	KEYWORD2
+connecttoelevenlabs	KEYWORD2
 getAudioCurrentTime	KEYWORD2
 getAudioFileDuration	KEYWORD2
 getDatamode	KEYWORD2

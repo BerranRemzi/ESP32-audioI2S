@@ -22,6 +22,36 @@ fs::SDFATFS SD_SDFAT;
 #endif
 #endif // AUDIO_NO_SD_FS
 
+static bool jsonEscape(const char* src, char* dst, size_t dstSize){
+    if(!src || !dst || !dstSize) return false;
+    size_t srcLen = strlen(src);
+    size_t j = 0;
+    for(size_t i = 0; i < srcLen; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if(c == '\"' || c == '\\') {
+            if(j + 2 >= dstSize) return false;
+            dst[j++] = '\\';
+            dst[j++] = c;
+        }
+        else if(c == '\b') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='b';}
+        else if(c == '\f') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='f';}
+        else if(c == '\n') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='n';}
+        else if(c == '\r') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='r';}
+        else if(c == '\t') {if(j + 2 >= dstSize) return false; dst[j++]='\\'; dst[j++]='t';}
+        else if(c < 0x20) {
+            if(j + 6 >= dstSize) return false;
+            snprintf(dst + j, 7, "\\u%04x", c);
+            j += 6;
+        }
+        else {
+            if(j + 1 >= dstSize) return false;
+            dst[j++] = src[i];
+        }
+    }
+    dst[j] = '\0';
+    return true;
+}
+
 //---------------------------------------------------------------------------------------------------------------------
 AudioBuffer::AudioBuffer(size_t maxBlockSize) {
     // if maxBlockSize isn't set use defaultspace (1600 bytes) is enough for aac and mp3 player
@@ -787,6 +817,150 @@ bool Audio::connecttospeech(const char* speech, const char* lang){
     m_f_tts = true;
     setDatamode(HTTP_RESPONSE_HEADER);
 
+    return true;
+}
+//---------------------------------------------------------------------------------------------------------------------
+bool Audio::connecttoelevenlabs(const char* speech, const char* api_key, const char* voice_id, const char* model_id){
+
+    if(!speech || !speech[0]) {
+        AUDIO_INFO("Speech text is empty");
+        return false;
+    }
+    if(!api_key || !api_key[0]) {
+        AUDIO_INFO("ElevenLabs API key is empty");
+        return false;
+    }
+    if(!voice_id || !voice_id[0]) {
+        AUDIO_INFO("ElevenLabs voice id is empty");
+        return false;
+    }
+    if(!model_id || !model_id[0]) {
+        AUDIO_INFO("ElevenLabs model id is empty");
+        return false;
+    }
+
+    setDefaults();
+
+    const char* host = "api.elevenlabs.io";
+    const uint16_t port = 443;
+    const char* endpointFmt = "/v1/text-to-speech/%s/stream?output_format=mp3_44100_128";
+
+    size_t speechLen = strlen(speech);
+    size_t modelLen = strlen(model_id);
+    size_t voiceIdLen = strlen(voice_id);
+
+    // worst case JSON escape expansion uses \u0000 (6 bytes per source byte)
+    size_t speechEscMax = speechLen * 6 + 1;
+    size_t modelEscMax = modelLen * 6 + 1;
+    // worst case URL escape expansion uses %XX (3 bytes per source byte)
+    size_t voiceEscMax = voiceIdLen * 3 + 1;
+
+    char* speechEsc = (char*)malloc(speechEscMax);
+    char* modelEsc = (char*)malloc(modelEscMax);
+    char* voiceEsc = (char*)malloc(voiceEscMax);
+
+    if(!speechEsc || !modelEsc || !voiceEsc) {
+        if(speechEsc) free(speechEsc);
+        if(modelEsc) free(modelEsc);
+        if(voiceEsc) free(voiceEsc);
+        log_e("out of memory");
+        return false;
+    }
+
+    if(!jsonEscape(speech, speechEsc, speechEscMax) || !jsonEscape(model_id, modelEsc, modelEscMax)) {
+        free(speechEsc); free(modelEsc); free(voiceEsc);
+        AUDIO_INFO("ElevenLabs payload escape failed");
+        return false;
+    }
+
+    memcpy(voiceEsc, voice_id, voiceIdLen + 1);
+    // voiceEscMax was sized for worst-case URL encoding expansion (%XX => 3 chars per source byte).
+    urlencode(voiceEsc, voiceEscMax);
+
+    int endpointLen = snprintf(NULL, 0, endpointFmt, voiceEsc);
+    if(endpointLen < 0) {
+        free(speechEsc); free(modelEsc); free(voiceEsc);
+        AUDIO_INFO("ElevenLabs endpoint build failed");
+        return false;
+    }
+    char* endpoint = (char*)malloc(endpointLen + 1);
+    if(!endpoint) {
+        free(speechEsc); free(modelEsc); free(voiceEsc);
+        log_e("out of memory");
+        return false;
+    }
+    snprintf(endpoint, endpointLen + 1, endpointFmt, voiceEsc);
+
+    const char* payloadFmt = "{\"text\":\"%s\",\"model_id\":\"%s\"}";
+    int payloadLen = snprintf(NULL, 0, payloadFmt, speechEsc, modelEsc);
+    if(payloadLen < 0) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint);
+        AUDIO_INFO("ElevenLabs payload build failed");
+        return false;
+    }
+    char* payload = (char*)malloc(payloadLen + 1);
+    if(!payload) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint);
+        log_e("out of memory");
+        return false;
+    }
+    snprintf(payload, payloadLen + 1, payloadFmt, speechEsc, modelEsc);
+
+    const char* reqFmt =
+            "POST %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "xi-api-key: %s\r\n"
+            "Content-Type: application/json\r\n"
+            "Accept: audio/mpeg\r\n"
+            "Accept-Encoding: identity\r\n"
+            "Connection: close\r\n"
+            "Content-Length: %u\r\n\r\n"
+            "%s";
+    int reqLen = snprintf(NULL, 0, reqFmt, endpoint, host, api_key, (unsigned int)strlen(payload), payload);
+    if(reqLen < 0) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload);
+        AUDIO_INFO("ElevenLabs request build failed");
+        return false;
+    }
+    char* req = (char*)malloc(reqLen + 1);
+    if(!req) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload);
+        log_e("out of memory");
+        return false;
+    }
+
+    int written = snprintf(req, reqLen + 1, reqFmt, endpoint, host, api_key, (unsigned int)strlen(payload), payload);
+
+    if(written <= 0 || written != reqLen) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload); free(req);
+        AUDIO_INFO("ElevenLabs request build failed");
+        return false;
+    }
+
+    _client = static_cast<WiFiClient*>(&clientsecure);
+    if(!_client->connect(host, port, m_timeout_ms_ssl)) {
+        free(speechEsc); free(modelEsc); free(voiceEsc); free(endpoint); free(payload); free(req);
+        AUDIO_INFO("Connection to ElevenLabs failed");
+        return false;
+    }
+
+    _client->print(req);
+
+    snprintf(m_lastHost, sizeof(m_lastHost), "https://%s%s", host, endpoint);
+    m_streamType = ST_WEBFILE;
+    m_f_running = true;
+    m_f_ssl = true;
+    m_f_tts = true;
+    m_expectedCodec = CODEC_MP3;
+    m_expectedPlsFmt = FORMAT_NONE;
+    setDatamode(HTTP_RESPONSE_HEADER);
+
+    free(speechEsc);
+    free(modelEsc);
+    free(voiceEsc);
+    free(endpoint);
+    free(payload);
+    free(req);
     return true;
 }
 //---------------------------------------------------------------------------------------------------------------------
