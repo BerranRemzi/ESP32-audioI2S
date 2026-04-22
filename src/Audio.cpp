@@ -326,6 +326,7 @@ void Audio::setInternalDacRamp(bool ramp_enabled, uint16_t ramp_time_ms) {
 //---------------------------------------------------------------------------------------------------------------------
 bool Audio::writeInternalDacLevel(uint16_t level, uint32_t frames) {
     if(!m_f_internalDAC || !frames) return true;
+    // Internal DAC path uses interleaved stereo samples: [left(16-bit) | right(16-bit)].
     uint32_t sample = ((uint32_t)level << 16) | level;
     size_t bytesWritten = 0;
     while(frames--) {
@@ -340,12 +341,10 @@ bool Audio::writeInternalDacLevel(uint16_t level, uint32_t frames) {
 void Audio::rampInternalDac(uint16_t fromLevel, uint16_t toLevel, uint16_t rampTimeMs) {
     if(!m_f_internalDAC || !m_f_internalDacRampEnabled) return;
     if(rampTimeMs == 0) return;
-    const uint16_t MIN_RAMP_STEPS = 4;
-    const uint16_t MAX_RAMP_STEPS = 128;
     uint16_t steps = rampTimeMs;
-    if(steps < MIN_RAMP_STEPS)   steps = MIN_RAMP_STEPS;
-    if(steps > MAX_RAMP_STEPS)   steps = MAX_RAMP_STEPS;
-    uint32_t sampleRate = m_i2s_config.sample_rate ? m_i2s_config.sample_rate : 16000;
+    if(steps < AUDIO_INTERNAL_DAC_RAMP_MIN_STEPS_DEFAULT) steps = AUDIO_INTERNAL_DAC_RAMP_MIN_STEPS_DEFAULT;
+    if(steps > AUDIO_INTERNAL_DAC_RAMP_MAX_STEPS_DEFAULT) steps = AUDIO_INTERNAL_DAC_RAMP_MAX_STEPS_DEFAULT;
+    uint32_t sampleRate = m_i2s_config.sample_rate ? m_i2s_config.sample_rate : AUDIO_INTERNAL_DAC_FALLBACK_SAMPLE_RATE_DEFAULT;
     uint32_t totalFrames = (sampleRate * rampTimeMs) / 1000;
     if(totalFrames < steps) totalFrames = steps;
     uint32_t framesPerStep = totalFrames / steps;
