@@ -327,9 +327,9 @@ void Audio::setInternalDacRamp(bool ramp_enabled, uint16_t ramp_time_ms) {
 bool Audio::writeInternalDacLevel(uint16_t level, uint32_t frames) {
     if(!m_f_internalDAC || !frames) return true;
     uint32_t sample = ((uint32_t)level << 16) | level;
-    m_i2s_bytesWritten = 0;
+    size_t bytesWritten = 0;
     while(frames--) {
-        if(i2s_write((i2s_port_t)m_i2s_num, (const char*)&sample, sizeof(sample), &m_i2s_bytesWritten, 100) != ESP_OK) {
+        if(i2s_write((i2s_port_t)m_i2s_num, (const char*)&sample, sizeof(sample), &bytesWritten, 100) != ESP_OK) {
             return false;
         }
     }
@@ -340,9 +340,11 @@ bool Audio::writeInternalDacLevel(uint16_t level, uint32_t frames) {
 void Audio::rampInternalDac(uint16_t fromLevel, uint16_t toLevel, uint16_t rampTimeMs) {
     if(!m_f_internalDAC || !m_f_internalDacRampEnabled) return;
     if(rampTimeMs == 0) return;
+    const uint16_t MIN_RAMP_STEPS = 4;
+    const uint16_t MAX_RAMP_STEPS = 128;
     uint16_t steps = rampTimeMs;
-    if(steps < 4)   steps = 4;
-    if(steps > 128) steps = 128;
+    if(steps < MIN_RAMP_STEPS)   steps = MIN_RAMP_STEPS;
+    if(steps > MAX_RAMP_STEPS)   steps = MAX_RAMP_STEPS;
     uint32_t sampleRate = m_i2s_config.sample_rate ? m_i2s_config.sample_rate : 16000;
     uint32_t totalFrames = (sampleRate * rampTimeMs) / 1000;
     if(totalFrames < steps) totalFrames = steps;
