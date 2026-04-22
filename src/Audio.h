@@ -21,6 +21,18 @@
 #include <vector>
 #include <driver/i2s.h>
 
+#ifndef AUDIO_INTERNAL_DAC_KEEP_MID_BIAS_DEFAULT
+#define AUDIO_INTERNAL_DAC_KEEP_MID_BIAS_DEFAULT false
+#endif
+
+#ifndef AUDIO_INTERNAL_DAC_RAMP_DEFAULT
+#define AUDIO_INTERNAL_DAC_RAMP_DEFAULT false
+#endif
+
+#ifndef AUDIO_INTERNAL_DAC_RAMP_TIME_MS_DEFAULT
+#define AUDIO_INTERNAL_DAC_RAMP_TIME_MS_DEFAULT 20
+#endif
+
 #ifndef AUDIO_NO_SD_FS
 #include <SPI.h>
 #ifdef SDFATFS_USED
@@ -212,6 +224,8 @@ public:
     uint32_t inBufferFree();   // returns the number of free bytes in the inputbuffer
     void setTone(int8_t gainLowPass, int8_t gainBandPass, int8_t gainHighPass);
     void setI2SCommFMT_LSB(bool commFMT);
+    void setInternalDacBias(bool keep_mid_bias_enabled);
+    void setInternalDacRamp(bool ramp_enabled, uint16_t ramp_time_ms = AUDIO_INTERNAL_DAC_RAMP_TIME_MS_DEFAULT);
     int getCodec() {return m_codec;}
     const char *getCodecname() {return codecname[m_codec];}
 
@@ -256,6 +270,9 @@ private:
     int  read_M4A_Header(uint8_t* data, size_t len);
     int  read_OGG_Header(uint8_t *data, size_t len);
     size_t process_m3u8_ID3_Header(uint8_t* packet);
+    void applyInternalDacIdleMode();
+    bool writeInternalDacLevel(uint16_t level, uint32_t frames);
+    void rampInternalDac(uint16_t fromLevel, uint16_t toLevel, uint16_t rampTimeMs);
     bool setSampleRate(uint32_t hz);
     bool setBitsPerSample(int bits);
     bool setChannels(int channels);
@@ -564,7 +581,11 @@ private:
     bool            m_f_Log = false;                // set in platformio.ini  -DAUDIO_LOG and -DCORE_DEBUG_LEVEL=3 or 4
     bool            m_f_continue = false;           // next m3u8 chunk is available
     bool            m_f_ts = true;                  // transport stream
+    bool            m_f_internalDacKeepMidBias = AUDIO_INTERNAL_DAC_KEEP_MID_BIAS_DEFAULT;
+    bool            m_f_internalDacRampEnabled = AUDIO_INTERNAL_DAC_RAMP_DEFAULT;
+    bool            m_f_internalDacNeedsRampUp = AUDIO_INTERNAL_DAC_RAMP_DEFAULT;
     uint8_t         m_f_channelEnabled = 3;         // internal DAC, both channels
+    uint16_t        m_internalDacRampTimeMs = AUDIO_INTERNAL_DAC_RAMP_TIME_MS_DEFAULT;
     uint32_t        m_audioFileDuration = 0;
     float           m_audioCurrentTime = 0;
     uint32_t        m_audioDataStart = 0;           // in bytes

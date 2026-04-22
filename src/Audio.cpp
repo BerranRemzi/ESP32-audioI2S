@@ -258,7 +258,18 @@ Audio::Audio(bool internalDAC /* = false */, uint8_t channelEnabled /* = I2S_DAC
         m_f_forceMono = false;
     }
 
-    i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+    if(m_f_internalDAC) {
+        if(m_f_internalDacKeepMidBias) {
+            applyInternalDacIdleMode();
+        }
+        else {
+            i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+            m_f_internalDacNeedsRampUp = m_f_internalDacRampEnabled;
+        }
+    }
+    else {
+        i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+    }
 
     for(int i = 0; i <3; i++) {
         m_filter[i].a0  = 1;
@@ -297,6 +308,73 @@ esp_err_t Audio::I2Sstart(uint8_t i2s_num) {
 esp_err_t Audio::I2Sstop(uint8_t i2s_num) {
     return i2s_stop((i2s_port_t) i2s_num);
 }
+//---------------------------------------------------------------------------------------------------------------------
+void Audio::setInternalDacBias(bool keep_mid_bias_enabled) {
+    m_f_internalDacKeepMidBias = keep_mid_bias_enabled;
+    if(m_f_internalDAC) applyInternalDacIdleMode();
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void Audio::setInternalDacRamp(bool ramp_enabled, uint16_t ramp_time_ms) {
+    m_f_internalDacRampEnabled = ramp_enabled;
+    m_internalDacRampTimeMs = ramp_time_ms;
+    if(m_f_internalDacRampEnabled && !m_f_internalDacKeepMidBias) {
+        m_f_internalDacNeedsRampUp = true;
+    }
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+bool Audio::writeInternalDacLevel(uint16_t level, uint32_t frames) {
+    if(!m_f_internalDAC || !frames) return true;
+    uint32_t sample = ((uint32_t)level << 16) | level;
+    m_i2s_bytesWritten = 0;
+    while(frames--) {
+        if(i2s_write((i2s_port_t)m_i2s_num, (const char*)&sample, sizeof(sample), &m_i2s_bytesWritten, 100) != ESP_OK) {
+            return false;
+        }
+    }
+    return true;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void Audio::rampInternalDac(uint16_t fromLevel, uint16_t toLevel, uint16_t rampTimeMs) {
+    if(!m_f_internalDAC || !m_f_internalDacRampEnabled) return;
+    if(rampTimeMs == 0) return;
+    uint16_t steps = rampTimeMs;
+    if(steps < 4)   steps = 4;
+    if(steps > 128) steps = 128;
+    uint32_t sampleRate = m_i2s_config.sample_rate ? m_i2s_config.sample_rate : 16000;
+    uint32_t totalFrames = (sampleRate * rampTimeMs) / 1000;
+    if(totalFrames < steps) totalFrames = steps;
+    uint32_t framesPerStep = totalFrames / steps;
+    if(framesPerStep < 1) framesPerStep = 1;
+    int32_t diff = (int32_t)toLevel - (int32_t)fromLevel;
+    for(uint16_t i = 0; i < steps; i++) {
+        uint16_t level = fromLevel + (diff * (int32_t)(i + 1)) / (int32_t)steps;
+        if(!writeInternalDacLevel(level, framesPerStep)) break;
+    }
+}
+
+//---------------------------------------------------------------------------------------------------------------------
+void Audio::applyInternalDacIdleMode() {
+    if(!m_f_internalDAC) {
+        i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+        return;
+    }
+    uint32_t dmaFrames = m_i2s_config.dma_buf_len * m_i2s_config.dma_buf_count;
+    if(m_f_internalDacKeepMidBias) {
+        if(m_f_internalDacRampEnabled) rampInternalDac(0x0000, 0x8000, m_internalDacRampTimeMs);
+        writeInternalDacLevel(0x8000, dmaFrames);
+        m_f_internalDacNeedsRampUp = false;
+        return;
+    }
+    if(m_f_internalDacRampEnabled) {
+        rampInternalDac(0x8000, 0x0000, m_internalDacRampTimeMs);
+    }
+    i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+    m_f_internalDacNeedsRampUp = m_f_internalDacRampEnabled;
+}
+
 //---------------------------------------------------------------------------------------------------------------------
 esp_err_t Audio::i2s_mclk_pin_select(const uint8_t pin) {
     // IDF >= 4.4 use setPinout(BCLK, LRC, DOUT, DIN, MCK) only, i2s_mclk_pin_select() is no longer needed
@@ -2467,7 +2545,8 @@ uint32_t Audio::stopSong() {
     }
 #endif                                           // AUDIO_NO_SD_FS
     memset(m_outBuff, 0, sizeof(m_outBuff));     //Clear OutputBuffer
-    i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+    if(m_f_internalDAC) applyInternalDacIdleMode();
+    else                i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
     return pos;
 }
 //---------------------------------------------------------------------------------------------------------------------
@@ -2481,7 +2560,8 @@ void Audio::playI2Sremains() { // returns true if all dma_buffs flushed
     while(m_validSamples) {
         playChunk();
     }
-    i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+    if(m_f_internalDAC) applyInternalDacIdleMode();
+    else                i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
     return;
 }
 //---------------------------------------------------------------------------------------------------------------------
@@ -2492,7 +2572,8 @@ bool Audio::pauseResume() {
         retVal = true;
         if(!m_f_running) {
             memset(m_outBuff, 0, sizeof(m_outBuff));               //Clear OutputBuffer
-            i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+            if(m_f_internalDAC) applyInternalDacIdleMode();
+            else                i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
         }
     }
     return retVal;
@@ -4277,7 +4358,8 @@ int Audio::sendBytes(uint8_t* data, size_t len) {
     }
     if(ret < 0) { // Error, skip the frame...
         if(m_f_Log) if(m_codec == CODEC_M4A){log_i("begin not found"); return 1;}
-        i2s_zero_dma_buffer((i2s_port_t)m_i2s_num);
+        if(m_f_internalDAC) applyInternalDacIdleMode();
+        else                i2s_zero_dma_buffer((i2s_port_t)m_i2s_num);
         if(!getChannels() && (ret == -2)) {
              ; // suppress errorcode MAINDATA_UNDERFLOW
         }
@@ -4692,6 +4774,10 @@ bool Audio::playSample(int16_t sample[2]) {
     }
 
     if(m_f_internalDAC) {
+        if(m_f_internalDacNeedsRampUp) {
+            rampInternalDac(0x0000, 0x8000, m_internalDacRampTimeMs);
+            m_f_internalDacNeedsRampUp = false;
+        }
         s32 += 0x80008000;
     }
     m_i2s_bytesWritten = 0;

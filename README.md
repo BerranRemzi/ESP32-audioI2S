@@ -37,6 +37,9 @@ void setup() {
     while (WiFi.status() != WL_CONNECTED) delay(1500);
     audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
     audio.setVolume(21); // 0...21
+    // Optional for internal DAC click/pop reduction:
+    // audio.setInternalDacBias(true);      // keep DAC at VDD/2 when idle
+    // audio.setInternalDacRamp(true, 20);  // smooth transitions, ramp time in ms
 
 //    audio.connecttoFS(SD, "/320k_test.mp3");
 //    audio.connecttohost("http://www.wdr.de/wdrlive/media/einslive.m3u");
@@ -93,3 +96,20 @@ Wiring
 ![Wiring](https://github.com/schreibfaul1/ESP32-audioI2S/blob/master/additional_info/ESP32_I2S_PCM5102A.JPG)
 Impulse diagram
 ![Impulse diagram](https://github.com/schreibfaul1/ESP32-audioI2S/blob/master/additional_info/Impulsdiagramm.jpg)
+
+## Internal DAC click/pop control
+
+For `Audio(true, ...)` (internal DAC mode), you can control idle bias and ramp behavior:
+
+- `audio.setInternalDacBias(keep_mid_bias_enabled)`
+  - `true`: keep DAC output biased at VDD/2 while idle (reduces start clicks)
+  - `false`: keep default behavior (idle level returns to 0V)
+- `audio.setInternalDacRamp(ramp_enabled, ramp_time_ms)`
+  - Enables lightweight ramping between 0V and VDD/2
+  - `ramp_time_ms` controls transition duration
+
+Optional compile-time defaults can be overridden before including `Audio.h`:
+
+- `AUDIO_INTERNAL_DAC_KEEP_MID_BIAS_DEFAULT`
+- `AUDIO_INTERNAL_DAC_RAMP_DEFAULT`
+- `AUDIO_INTERNAL_DAC_RAMP_TIME_MS_DEFAULT`
