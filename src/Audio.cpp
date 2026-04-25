@@ -267,6 +267,42 @@ esp_err_t Audio::I2Sstart(uint8_t i2s_num) {
 esp_err_t Audio::I2Sstop(uint8_t i2s_num) {
     return i2s_stop((i2s_port_t) i2s_num);
 }
+
+static uint16_t s_last_internal_dac_level = 0x8000;
+
+static void clear_i2s_tx_buffer(uint8_t i2s_num, bool internalDAC, const i2s_config_t& cfg) {
+    if(!internalDAC) {
+        i2s_zero_dma_buffer((i2s_port_t)i2s_num);
+        return;
+    }
+
+    // Ramp from the actually written DAC level down to 0x0000 to avoid
+    // leaving a residual step if the current level is not exactly midscale.
+    const uint32_t frames = cfg.dma_buf_len * cfg.dma_buf_count;
+    size_t bytesWritten = 0;
+    if(frames == 0) {
+        return;
+    }
+
+    const uint16_t startLevel = s_last_internal_dac_level;
+
+    for(uint32_t i = 0; i < frames; ++i) {
+        uint16_t level;
+        if(frames == 1) {
+            level = 0;
+        }
+        else {
+            uint32_t scaled = ((uint32_t)startLevel * i) / (frames - 1);
+            level = (uint16_t)(startLevel - scaled);
+        }
+
+        uint32_t sample = ((uint32_t)level << 16) | level;
+        i2s_write((i2s_port_t)i2s_num, (const char*)&sample, sizeof(sample), &bytesWritten, 10);
+    }
+
+    s_last_internal_dac_level = 0;
+}
+
 //---------------------------------------------------------------------------------------------------------------------
 esp_err_t Audio::i2s_mclk_pin_select(const uint8_t pin) {
     // IDF >= 4.4 use setPinout(BCLK, LRC, DOUT, DIN, MCK) only, i2s_mclk_pin_select() is no longer needed
@@ -2293,7 +2329,7 @@ uint32_t Audio::stopSong() {
     }
 #endif                                           // AUDIO_NO_SD_FS
     memset(m_outBuff, 0, sizeof(m_outBuff));     //Clear OutputBuffer
-    i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+    clear_i2s_tx_buffer(m_i2s_num, m_f_internalDAC, m_i2s_config);
     return pos;
 }
 //---------------------------------------------------------------------------------------------------------------------
@@ -2307,7 +2343,7 @@ void Audio::playI2Sremains() { // returns true if all dma_buffs flushed
     while(m_validSamples) {
         playChunk();
     }
-    i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+    clear_i2s_tx_buffer(m_i2s_num, m_f_internalDAC, m_i2s_config);
     return;
 }
 //---------------------------------------------------------------------------------------------------------------------
@@ -2318,7 +2354,7 @@ bool Audio::pauseResume() {
         retVal = true;
         if(!m_f_running) {
             memset(m_outBuff, 0, sizeof(m_outBuff));               //Clear OutputBuffer
-            i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
+            clear_i2s_tx_buffer(m_i2s_num, m_f_internalDAC, m_i2s_config);
         }
     }
     return retVal;
@@ -2411,7 +2447,7 @@ bool Audio::playChunk() {
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::loop() {
 
-    if(!m_f_running) return;
+	if(!m_f_running) return;
 	
     if(InBuff.isComplete() && InBuff.isEmpty()) {
         playI2Sremains();
@@ -2901,13 +2937,13 @@ void Audio::processLocalFile() {
 
     availableBytes = 16 * 1024; // set some large value
 
-    availableBytes = min(availableBytes, InBuff.writeSpace());
-    availableBytes = min(availableBytes, audiofile.size() - byteCounter);
+    availableBytes = min(availableBytes, (uint32_t)InBuff.writeSpace());
+    availableBytes = min(availableBytes, (uint32_t)(audiofile.size() - byteCounter));
     if(m_contentlength){
-        if(m_contentlength > getFilePos()) availableBytes = min(availableBytes, m_contentlength - getFilePos());
+        if(m_contentlength > getFilePos()) availableBytes = min(availableBytes, (uint32_t)(m_contentlength - getFilePos()));
     }
     if(m_audioDataSize){
-        availableBytes = min(availableBytes, m_audioDataSize + m_audioDataStart - byteCounter);
+        availableBytes = min(availableBytes, (uint32_t)(m_audioDataSize + m_audioDataStart - byteCounter));
     }
 
     int32_t bytesAddedToBuffer = audiofile.read(InBuff.getWritePtr(), availableBytes);
@@ -4103,7 +4139,7 @@ int Audio::sendBytes(uint8_t* data, size_t len) {
     }
     if(ret < 0) { // Error, skip the frame...
         if(m_f_Log) if(m_codec == CODEC_M4A){log_i("begin not found"); return 1;}
-        i2s_zero_dma_buffer((i2s_port_t)m_i2s_num);
+        clear_i2s_tx_buffer(m_i2s_num, m_f_internalDAC, m_i2s_config);
         if(!getChannels() && (ret == -2)) {
              ; // suppress errorcode MAINDATA_UNDERFLOW
         }
@@ -4519,6 +4555,7 @@ bool Audio::playSample(int16_t sample[2]) {
 
     if(m_f_internalDAC) {
         s32 += 0x80008000;
+        s_last_internal_dac_level = (uint16_t)(s32 & 0xFFFF);
     }
     m_i2s_bytesWritten = 0;
     esp_err_t err = i2s_write((i2s_port_t) m_i2s_num, (const char*) &s32, sizeof(uint32_t), &m_i2s_bytesWritten, 100);
