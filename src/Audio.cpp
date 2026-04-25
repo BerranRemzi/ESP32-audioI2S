@@ -269,6 +269,25 @@ esp_err_t Audio::I2Sstop(uint8_t i2s_num) {
 }
 
 static uint16_t s_last_internal_dac_level = 0x8000;
+static bool s_need_internal_dac_start_ramp = true;
+
+static void prime_internal_dac_start_level(uint8_t i2s_num, bool internalDAC) {
+    if(!internalDAC || !s_need_internal_dac_start_ramp) {
+        return;
+    }
+
+    size_t bytesWritten = 0;
+    for(uint16_t code = 0; code <= 127; ++code) {
+        // ESP32 internal DAC uses 8-bit amplitude. Mirror the 8-bit code
+        // into the 16-bit I2S lane so startup slews from 0 to ~midscale.
+        uint16_t level = (uint16_t)((code << 8) | code);
+        uint32_t sample = ((uint32_t)level << 16) | level;
+        i2s_write((i2s_port_t)i2s_num, (const char*)&sample, sizeof(sample), &bytesWritten, 10);
+    }
+
+    s_last_internal_dac_level = 0x7F7F;
+    s_need_internal_dac_start_ramp = false;
+}
 
 static void clear_i2s_tx_buffer(uint8_t i2s_num, bool internalDAC, const i2s_config_t& cfg) {
     if(!internalDAC) {
@@ -301,6 +320,7 @@ static void clear_i2s_tx_buffer(uint8_t i2s_num, bool internalDAC, const i2s_con
     }
 
     s_last_internal_dac_level = 0;
+    s_need_internal_dac_start_ramp = true;
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -4554,6 +4574,7 @@ bool Audio::playSample(int16_t sample[2]) {
     }
 
     if(m_f_internalDAC) {
+        prime_internal_dac_start_level(m_i2s_num, m_f_internalDAC);
         s32 += 0x80008000;
         s_last_internal_dac_level = (uint16_t)(s32 & 0xFFFF);
     }
