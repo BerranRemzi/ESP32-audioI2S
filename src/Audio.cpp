@@ -269,6 +269,20 @@ esp_err_t Audio::I2Sstop(uint8_t i2s_num) {
     return i2s_stop((i2s_port_t) i2s_num);
 }
 
+void Audio::clearDmaBuffer() {
+    if(!m_f_internalDAC) {
+        i2s_zero_dma_buffer((i2s_port_t)m_i2s_num);
+        return;
+    }
+
+    const uint32_t frames = m_i2s_config.dma_buf_len * m_i2s_config.dma_buf_count;
+    const uint32_t sample = 0x80008000;
+    size_t bytesWritten = 0;
+    for(uint32_t i = 0; i < frames; ++i) {
+        i2s_write((i2s_port_t)m_i2s_num, (const char*)&sample, sizeof(sample), &bytesWritten, 10);
+    }
+}
+
 static void clear_i2s_tx_buffer(uint8_t i2s_num, bool internalDAC, const i2s_config_t& cfg) {
     if(!internalDAC) {
         i2s_zero_dma_buffer((i2s_port_t)i2s_num);

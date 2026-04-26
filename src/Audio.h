@@ -194,6 +194,7 @@ public:
     void setVolume(uint8_t vol);
     uint8_t getVolume();
     uint8_t getI2sPort();
+    void clearDmaBuffer();
 
     uint32_t getAudioDataStartPos();
     uint32_t getFileSize();
