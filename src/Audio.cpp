@@ -2336,6 +2336,11 @@ uint32_t Audio::stopSong() {
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::playI2Sremains() { // returns true if all dma_buffs flushed
+    if(m_f_internalDAC) {
+        clear_i2s_tx_buffer(m_i2s_num, m_f_internalDAC, m_i2s_config);
+        return;
+    }
+
     if(!getSampleRate()) setSampleRate(96000);
     if(!getChannels()) setChannels(2);
     if(getBitsPerSample() > 8) memset(m_outBuff,   0, sizeof(m_outBuff));     //Clear OutputBuffer (signed)
