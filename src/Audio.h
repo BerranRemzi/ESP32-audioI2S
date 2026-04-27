@@ -189,6 +189,7 @@ public:
     bool isRunning() {return m_f_running;}
     void loop();
     uint32_t stopSong();
+    void freeDecoderMemory();
     void forceMono(bool m);
     void setBalance(int8_t bal = 0);
     void setVolume(uint8_t vol);

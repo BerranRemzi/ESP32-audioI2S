@@ -2334,6 +2334,12 @@ uint32_t Audio::stopSong() {
     clear_i2s_tx_buffer(m_i2s_num, m_f_internalDAC, m_i2s_config);
     return pos;
 }
+
+void Audio::freeDecoderMemory() {
+    MP3Decoder_FreeBuffers();
+    FLACDecoder_FreeBuffers();
+    AACDecoder_FreeBuffers();
+}
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::playI2Sremains() { // returns true if all dma_buffs flushed
     if(m_f_internalDAC) {
