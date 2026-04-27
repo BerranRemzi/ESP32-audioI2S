@@ -4457,6 +4457,9 @@ bool Audio::audioFileSeek(const float speed) {
 }
 //---------------------------------------------------------------------------------------------------------------------
 bool Audio::setSampleRate(uint32_t sampRate) {
+    if(m_sampleRate == sampRate) {
+        return true; // no change
+    }
     if(!sampRate) sampRate = 16000; // fuse, if there is no value -> set default #209
     i2s_set_sample_rates((i2s_port_t)m_i2s_num, sampRate);
     m_sampleRate = sampRate;
