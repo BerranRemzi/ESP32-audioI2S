@@ -181,8 +181,8 @@ Audio::Audio(bool internalDAC /* = false */, uint8_t channelEnabled /* = I2S_DAC
     m_i2s_config.bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT;
     m_i2s_config.channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT;
     m_i2s_config.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1; // interrupt priority
-    m_i2s_config.dma_buf_count        = 16;
-    m_i2s_config.dma_buf_len          = 512;
+    m_i2s_config.dma_desc_num        = 16;
+    m_i2s_config.dma_frame_num          = 512;
     m_i2s_config.use_apll             = APLL_DISABLE; // must be disabled in V2.0.1-RC1
     // Keep last DAC sample on underrun only when internal DAC is active.
     m_i2s_config.tx_desc_auto_clear   = internalDAC ? false : true;   // new in V1.0.1
@@ -275,7 +275,7 @@ void Audio::clearDmaBuffer() {
         return;
     }
 
-    const uint32_t frames = m_i2s_config.dma_buf_len * m_i2s_config.dma_buf_count;
+    const uint32_t frames = m_i2s_config.dma_frame_num * m_i2s_config.dma_desc_num;
     const uint32_t sample = 0x80008000;
     size_t bytesWritten = 0;
     for(uint32_t i = 0; i < frames; ++i) {
@@ -291,7 +291,7 @@ static void clear_i2s_tx_buffer(uint8_t i2s_num, bool internalDAC, const i2s_con
 
     // Keep internal DAC biased at midscale (0x80) by writing 0x8000 per channel
     // so idle output stays near Vdd/2 instead of slewing to ground.
-    const uint32_t frames = cfg.dma_buf_len * cfg.dma_buf_count;
+    const uint32_t frames = cfg.dma_frame_num * cfg.dma_desc_num;
     size_t bytesWritten = 0;
     if(frames == 0) {
         return;
@@ -356,7 +356,7 @@ void Audio::setDefaults() {
     vector_clear_and_shrink(m_playlistContent);
     m_hashQueue.clear(); m_hashQueue.shrink_to_fit(); // uint32_t vector
     client.stop();
-    client.flush(); // release memory
+    client.clear(); // release memory
     clientsecure.stop();
     clientsecure.flush();
     _client = static_cast<WiFiClient*>(&client); /* default to *something* so that no NULL deref can happen */
@@ -2346,7 +2346,7 @@ void Audio::playI2Sremains() { // returns true if all dma_buffs flushed
     if(getBitsPerSample() > 8) memset(m_outBuff,   0, sizeof(m_outBuff));     //Clear OutputBuffer (signed)
     else                       memset(m_outBuff, 128, sizeof(m_outBuff));     //Clear OutputBuffer (unsigned, PCM 8u)
 
-    m_validSamples = m_i2s_config.dma_buf_len * m_i2s_config.dma_buf_count;
+    m_validSamples = m_i2s_config.dma_frame_num * m_i2s_config.dma_desc_num;
     while(m_validSamples) {
         playChunk();
     }
